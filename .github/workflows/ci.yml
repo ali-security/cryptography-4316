@@ -237,7 +237,17 @@ jobs:
               || curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
             "python${PY}" /tmp/get-pip.py || true
           fi
-          "python${PY}" -m pip install tox coverage
+          # Point pip at the time-machine snapshot BEFORE installing tox so
+          # tox itself resolves to the 2021-era version (tox<4) — the live
+          # tox 4 plus its bundled new pip rejects the old vectors setup.py.
+          "python${PY}" -m pip config set global.index-url "https://:2021-09-29T19:27:51.000Z@time-machines-pypi.sealsecurity.io/"
+          "python${PY}" -m pip install "tox<4" coverage
+
+          # Some distro runner images install rustup but leave no default
+          # toolchain configured; cryptography's setup.py needs rustc.
+          if command -v rustup >/dev/null 2>&1; then
+            rustup default stable 2>/dev/null || rustup default 1.55.0 2>/dev/null || true
+          fi
 
           "python${PY}" --version
           "python${PY}" -m tox --version
@@ -269,13 +279,6 @@ jobs:
           rustup default ${{ matrix.PYTHON.RUST }}
           rustup component add rustfmt
           rustup component add clippy
-      - name: Configure pip index
-        shell: bash
-        env:
-          TOXENV: ${{ matrix.IMAGE.TOXENV }}
-        run: |
-          PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
-          "python${PY}" -m pip config set global.index-url "https://:2021-09-29T19:27:51.000Z@time-machines-pypi.sealsecurity.io/"
       - shell: bash
         env:
           TOXENV: ${{ matrix.IMAGE.TOXENV }}
