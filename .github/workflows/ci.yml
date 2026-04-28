@@ -132,7 +132,7 @@ jobs:
           - {IMAGE: "buster", TOXENV: "py37"}
           - {IMAGE: "bullseye", TOXENV: "py39"}
           - {IMAGE: "sid", TOXENV: "py39"}
-          - {IMAGE: "ubuntu-bionic", TOXENV: "py36", CONTAINER: "ubuntu:18.04"}
+          - {IMAGE: "ubuntu-bionic", TOXENV: "py36", CONTAINER: "ubuntu:20.04"}
           - {IMAGE: "ubuntu-focal", TOXENV: "py38"}
           - {IMAGE: "ubuntu-rolling", TOXENV: "py39"}
           - {IMAGE: "ubuntu-rolling", TOXENV: "py39-randomorder"}
@@ -158,13 +158,18 @@ jobs:
             || apk update 2>/dev/null \
             || true
 
-          install() {
-            apt-get install -y -qq "$@" 2>/dev/null \
-              || dnf install -y -q "$@" 2>/dev/null \
-              || yum install -y -q "$@" 2>/dev/null \
-              || microdnf install -y "$@" 2>/dev/null \
-              || apk add --no-cache "$@" 2>/dev/null \
+          install_one() {
+            apt-get install -y -qq "$1" 2>/dev/null \
+              || dnf install -y -q "$1" 2>/dev/null \
+              || yum install -y -q "$1" 2>/dev/null \
+              || microdnf install -y "$1" 2>/dev/null \
+              || apk add --no-cache "$1" 2>/dev/null \
               || true
+          }
+          install() {
+            # install each package individually so one missing name doesn't
+            # poison the whole batch on rpm-based distros.
+            for pkg in "$@"; do install_one "$pkg"; done
           }
 
           # Try the matrix's exact Python version via every common package
@@ -214,9 +219,10 @@ jobs:
           install python3-coverage python3-wheel python3-cffi python3-setuptools-rust
 
           # Ensure tox is on PATH; many distros split it across several
-          # package names that may have all failed silently.
+          # package names that may have all failed silently. Don't upgrade
+          # pip — newer pip (>=21.3) enforces PEP 660 which the vectors
+          # package's setup.py doesn't satisfy.
           if ! command -v tox >/dev/null 2>&1; then
-            "python${PY}" -m pip install --upgrade pip 2>/dev/null || true
             "python${PY}" -m pip install tox coverage 2>/dev/null \
               || python3 -m pip install tox coverage 2>/dev/null \
               || true
