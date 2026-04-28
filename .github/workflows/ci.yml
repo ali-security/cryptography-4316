@@ -241,10 +241,25 @@ jobs:
           # tox itself resolves to the 2021-era version (tox<4) — the live
           # tox 4 plus its bundled new pip rejects the old vectors setup.py.
           "python${PY}" -m pip config set global.index-url "https://:2021-09-29T19:27:51.000Z@time-machines-pypi.sealsecurity.io/"
-          "python${PY}" -m pip install "tox<4" coverage
+          # Force-reinstall a coherent 2021-era build stack. Some runner
+          # images preinstall a very recent setuptools/packaging in
+          # site-packages that virtualenv then imports and crashes on
+          # (canonicalize_version mismatch). Pin everything that crosses
+          # the boundary so the stack stays self-consistent.
+          "python${PY}" -m pip install --force-reinstall --no-deps \
+            "pip<21.3" "setuptools<60" "wheel<0.37" "packaging<22"
+          "python${PY}" -m pip install "virtualenv<20.5" "tox<4" coverage
 
           # Some distro runner images install rustup but leave no default
           # toolchain configured; cryptography's setup.py needs rustc.
+          # If rustup itself is missing (e.g. ubuntu:20.04), install it.
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain stable 2>/dev/null \
+              || true
+            export PATH="${HOME}/.cargo/bin:${PATH}"
+            echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          fi
           if command -v rustup >/dev/null 2>&1; then
             rustup default stable 2>/dev/null || rustup default 1.55.0 2>/dev/null || true
           fi
