@@ -151,6 +151,17 @@ jobs:
           PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
           PYNODOT=$(echo "${PY}" | tr -d .)
 
+          # Some distros (notably Debian buster) are EOL and have moved
+          # to archive.debian.org; rewrite sources.list before update so
+          # apt-get install can actually find packages.
+          if [ -f /etc/debian_version ] && [ -f /etc/apt/sources.list ]; then
+            sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/debian-security|g; s|http://security.debian.org|http://archive.debian.org/debian-security|g; s|http://deb.debian.org|http://archive.debian.org|g' /etc/apt/sources.list || true
+            for f in /etc/apt/sources.list.d/*.list; do
+              [ -f "$f" ] && sed -i 's|http://deb.debian.org|http://archive.debian.org|g; s|http://security.debian.org|http://archive.debian.org/debian-security|g' "$f" || true
+            done
+            echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          fi
+
           apt-get update -qq 2>/dev/null \
             || dnf -y -q makecache 2>/dev/null \
             || yum -y -q makecache 2>/dev/null \
@@ -211,25 +222,25 @@ jobs:
             ln -sf "${PYENV_ROOT}/versions/${PATCH:-${PY}.15}/bin/python${PY}" /usr/local/bin/"python${PY}"
           fi
 
-          # tooling used by later steps / tox
+          # tooling used by later steps
           install pwsh
           install sudo
-          install python3-pip
-          install tox python3-tox
           install python3-coverage python3-wheel python3-cffi python3-setuptools-rust
 
-          # Ensure tox is on PATH; many distros split it across several
-          # package names that may have all failed silently. Don't upgrade
-          # pip — newer pip (>=21.3) enforces PEP 660 which the vectors
-          # package's setup.py doesn't satisfy.
-          if ! command -v tox >/dev/null 2>&1; then
-            "python${PY}" -m pip install tox coverage 2>/dev/null \
-              || python3 -m pip install tox coverage 2>/dev/null \
-              || true
+          # Always install tox via the matrix's python so the .pkg env tox
+          # builds uses python${PY}, not the distro's default (e.g. fedora
+          # 43 ships python3.14 which trips on cryptography 35.0.0's old
+          # build backend). Don't upgrade pip — pip>=21.3 enforces PEP 660
+          # which the vectors package's setup.py doesn't satisfy.
+          if ! "python${PY}" -m pip --version >/dev/null 2>&1; then
+            curl -fsSL https://bootstrap.pypa.io/pip/${PY}/get-pip.py -o /tmp/get-pip.py 2>/dev/null \
+              || curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+            "python${PY}" /tmp/get-pip.py || true
           fi
+          "python${PY}" -m pip install tox coverage
 
-          "python${PY}" --version || python3 --version
-          tox --version || true
+          "python${PY}" --version
+          "python${PY}" -m tox --version
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -259,13 +270,26 @@ jobs:
           rustup component add rustfmt
           rustup component add clippy
       - name: Configure pip index
-        run: python3 -m pip config set global.index-url "https://:2021-09-29T19:27:51.000Z@time-machines-pypi.sealsecurity.io/"
-      - run: python3 -m pip install tox coverage pip wheel cffi setuptools-rust || true
-      - run: 'tox -- --wycheproof-root="wycheproof"'
+        shell: bash
+        env:
+          TOXENV: ${{ matrix.IMAGE.TOXENV }}
+        run: |
+          PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
+          "python${PY}" -m pip config set global.index-url "https://:2021-09-29T19:27:51.000Z@time-machines-pypi.sealsecurity.io/"
+      - shell: bash
+        env:
+          TOXENV: ${{ matrix.IMAGE.TOXENV }}
+        run: |
+          PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
+          "python${PY}" -m pip install wheel cffi setuptools-rust || true
+      - shell: bash
         env:
           TOXENV: ${{ matrix.IMAGE.TOXENV }}
           RUSTUP_HOME: /root/.rustup
           CARGO_TARGET_DIR: ${{ format('{0}/src/rust/target/', github.workspace) }}
+        run: |
+          PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
+          "python${PY}" -m tox -- --wycheproof-root="wycheproof"
       - uses: ./.github/actions/upload-coverage
         with:
           name: "${{ matrix.IMAGE.TOXENV }} on ${{ matrix.IMAGE.IMAGE }}"
