@@ -62,17 +62,22 @@ def main(platform, target):
     response = get_response(session, runs_url, token).json()
     artifacts_url = response["workflow_runs"][0]["artifacts_url"]
     response = get_response(session, artifacts_url, token).json()
+    # pyca/infra dropped the MSVC suffix from Windows artifact names
+    # (openssl-win32-2019 -> openssl-win32). Match on the prefix but
+    # keep the full target as the extraction dir so callers' INCLUDE/LIB
+    # paths still work.
+    lookup_name = target.rsplit("-", 1)[0] if platform == "windows" else target
     for artifact in response["artifacts"]:
-        if artifact["name"] == target:
+        if artifact["name"] == lookup_name:
             print("Found artifact")
             response = get_response(
                 session, artifact["archive_download_url"], token
             )
             zipfile.ZipFile(io.BytesIO(response.content)).extractall(
-                os.path.join(path, artifact["name"])
+                os.path.join(path, target)
             )
             return
-    raise ValueError("Didn't find {} in {}".format(target, response))
+    raise ValueError("Didn't find {} in {}".format(lookup_name, response))
 
 
 if __name__ == "__main__":
