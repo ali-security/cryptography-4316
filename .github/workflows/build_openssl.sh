@@ -11,7 +11,15 @@ shlib_sed() {
 }
 
 if [[ "${TYPE}" == "openssl" ]]; then
-  curl -O "https://www.openssl.org/source/openssl-${VERSION}.tar.gz"
+  # openssl.org legacy /source/<file>.tar.gz no longer serves the file;
+  # pull from GitHub releases instead. Tag format differs between the
+  # 1.x line (OpenSSL_1_1_1l) and the 3.x line (openssl-3.0.0).
+  if [[ "${VERSION}" =~ ^3\. ]]; then
+    OPENSSL_TAG="openssl-${VERSION}"
+  else
+    OPENSSL_TAG="OpenSSL_${VERSION//./_}"
+  fi
+  curl -fLO "https://github.com/openssl/openssl/releases/download/${OPENSSL_TAG}/openssl-${VERSION}.tar.gz"
   tar zxf "openssl-${VERSION}.tar.gz"
   pushd "openssl-${VERSION}"
   # CONFIG_FLAGS is a global coming from a previous step
