@@ -122,7 +122,7 @@ jobs:
 
   linux-distros:
     runs-on: ubuntu-22.04
-    container: ghcr.io/pyca/cryptography-runner-${{ matrix.IMAGE.IMAGE }}
+    container: ${{ matrix.IMAGE.CONTAINER || format('ghcr.io/pyca/cryptography-runner-{0}', matrix.IMAGE.IMAGE) }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,7 +132,7 @@ jobs:
           - {IMAGE: "buster", TOXENV: "py37"}
           - {IMAGE: "bullseye", TOXENV: "py39"}
           - {IMAGE: "sid", TOXENV: "py39"}
-          - {IMAGE: "ubuntu-bionic", TOXENV: "py36"}
+          - {IMAGE: "ubuntu-bionic", TOXENV: "py36", CONTAINER: "ubuntu:18.04"}
           - {IMAGE: "ubuntu-focal", TOXENV: "py38"}
           - {IMAGE: "ubuntu-rolling", TOXENV: "py39"}
           - {IMAGE: "ubuntu-rolling", TOXENV: "py39-randomorder"}
@@ -188,7 +188,7 @@ jobs:
 
           # Last resort: build the requested Python from source via pyenv.
           if ! command -v "python${PY}" >/dev/null 2>&1; then
-            install build-essential gcc make curl ca-certificates git \
+            install build-essential gcc make patch curl ca-certificates git \
               libssl-dev openssl-devel libffi-dev libffi-devel \
               zlib1g-dev zlib-devel zlib-dev \
               libbz2-dev bzip2-devel bzip2-dev \
@@ -213,7 +213,17 @@ jobs:
           install tox python3-tox
           install python3-coverage python3-wheel python3-cffi python3-setuptools-rust
 
+          # Ensure tox is on PATH; many distros split it across several
+          # package names that may have all failed silently.
+          if ! command -v tox >/dev/null 2>&1; then
+            "python${PY}" -m pip install --upgrade pip 2>/dev/null || true
+            "python${PY}" -m pip install tox coverage 2>/dev/null \
+              || python3 -m pip install tox coverage 2>/dev/null \
+              || true
+          fi
+
           "python${PY}" --version || python3 --version
+          tox --version || true
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
