@@ -142,21 +142,77 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: install dependencies
+        env:
+          TOXENV: ${{ matrix.IMAGE.TOXENV }}
         run: |
-          apt update || dnf update || yum update || microdnf update || apk update || true
+          set -x
+          # Derive 3.X from TOXENV (py36 -> 3.6, py39-randomorder -> 3.9)
+          PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
+          PYNODOT="${PY//./}"
+
+          apt-get update -qq 2>/dev/null \
+            || dnf -y -q makecache 2>/dev/null \
+            || yum -y -q makecache 2>/dev/null \
+            || microdnf -y update 2>/dev/null \
+            || apk update 2>/dev/null \
+            || true
+
           install() {
-            local package="$1"
-            apt install -y "$package" || dnf install -y "$package" || yum install -y "$package" || microdnf install -y "$package" || apk add "$package" || true
+            apt-get install -y -qq "$@" 2>/dev/null \
+              || dnf install -y -q "$@" 2>/dev/null \
+              || yum install -y -q "$@" 2>/dev/null \
+              || microdnf install -y "$@" 2>/dev/null \
+              || apk add --no-cache "$@" 2>/dev/null \
+              || true
           }
+
+          # Try the matrix's exact Python version via every common package
+          # name across the supported distros. Older Pythons on newer
+          # distros may need an extra repo (deadsnakes / EPEL / SCL); we
+          # still attempt and fall back to a pyenv source build below.
+          install "python${PY}" "python${PY}-dev" "python${PY}-distutils" "python${PY}-venv"
+          install "python${PYNODOT}" "python${PYNODOT}-devel" "python${PYNODOT}-pip"
+          install "py${PYNODOT}-pip"
+
+          # Add deadsnakes for Ubuntu/Debian when the version isn't in the
+          # default repos.
+          if ! command -v "python${PY}" >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+              install software-properties-common gnupg ca-certificates curl lsb-release
+              add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+              apt-get update -qq 2>/dev/null || true
+              install "python${PY}" "python${PY}-dev" "python${PY}-distutils" "python${PY}-venv"
+            fi
+          fi
+
+          # Last resort: build the requested Python from source via pyenv.
+          if ! command -v "python${PY}" >/dev/null 2>&1; then
+            install build-essential gcc make curl ca-certificates git \
+              libssl-dev openssl-devel libffi-dev libffi-devel \
+              zlib1g-dev zlib-devel zlib-dev \
+              libbz2-dev bzip2-devel bzip2-dev \
+              libreadline-dev readline-devel readline-dev \
+              libsqlite3-dev sqlite-devel sqlite-dev \
+              liblzma-dev xz-devel xz-dev linux-headers
+            curl -fsSL https://pyenv.run | bash || true
+            export PYENV_ROOT="${HOME}/.pyenv"
+            export PATH="${PYENV_ROOT}/bin:${PATH}"
+            eval "$(pyenv init -)" 2>/dev/null || true
+            # Pick the latest patch for the requested 3.X line.
+            PATCH=$(pyenv install --list 2>/dev/null | awk -v v="${PY}" '$0 ~ "^[[:space:]]*"v"\\."{gsub(/^[[:space:]]+/, ""); print}' | grep -vE '[a-zA-Z]' | tail -1)
+            pyenv install -s "${PATCH:-${PY}.15}"
+            pyenv global "${PATCH:-${PY}.15}"
+            ln -sf "${PYENV_ROOT}/versions/${PATCH:-${PY}.15}/bin/python${PY}" /usr/local/bin/"python${PY}"
+          fi
+
+          # tooling used by later steps / tox
           install pwsh
-          install python3-pip
           install sudo
-          install tox
-          install python3-tox
-          install python3-coverage
-          install python3-wheel
-          install python3-cffi
-          install python3-setuptools-rust
+          install python3-pip
+          install tox python3-tox
+          install python3-coverage python3-wheel python3-cffi python3-setuptools-rust
+
+          "python${PY}" --version || python3 --version
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
