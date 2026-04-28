@@ -142,13 +142,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: install dependencies
+        shell: bash
         env:
           TOXENV: ${{ matrix.IMAGE.TOXENV }}
         run: |
           set -x
           # Derive 3.X from TOXENV (py36 -> 3.6, py39-randomorder -> 3.9)
           PY=$(echo "${TOXENV}" | sed -E 's/^py([0-9])([0-9]+).*/\1.\2/')
-          PYNODOT="${PY//./}"
+          PYNODOT=$(echo "${PY}" | tr -d .)
 
           apt-get update -qq 2>/dev/null \
             || dnf -y -q makecache 2>/dev/null \
