@@ -183,6 +183,13 @@ jobs:
             for pkg in "$@"; do install_one "$pkg"; done
           }
 
+          # Build/runtime dependencies needed regardless of whether we
+          # use the distro's python or build via pyenv.
+          install curl ca-certificates git gcc make patch
+          install libssl-dev openssl-dev openssl-devel
+          install libffi-dev libffi-devel
+          install pkg-config pkgconfig
+
           # Try the matrix's exact Python version via every common package
           # name across the supported distros. Older Pythons on newer
           # distros may need an extra repo (deadsnakes / EPEL / SCL); we
@@ -255,14 +262,17 @@ jobs:
           # If rustup itself is missing (e.g. ubuntu:20.04), install it.
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --profile minimal --default-toolchain stable 2>/dev/null \
-              || true
-            export PATH="${HOME}/.cargo/bin:${PATH}"
+              | sh -s -- -y --profile minimal --default-toolchain stable
+            # Source rustup's env so this shell sees rustup/cargo, then
+            # propagate ~/.cargo/bin to subsequent steps.
+            . "${HOME}/.cargo/env" 2>/dev/null || export PATH="${HOME}/.cargo/bin:${PATH}"
             echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
           fi
-          if command -v rustup >/dev/null 2>&1; then
-            rustup default stable 2>/dev/null || rustup default 1.55.0 2>/dev/null || true
-          fi
+          # Force a default toolchain explicitly (some images preinstall
+          # rustup without configuring a default).
+          rustup default stable || rustup default 1.55.0 || true
+          rustup --version
+          rustc --version
 
           "python${PY}" --version
           "python${PY}" -m tox --version
